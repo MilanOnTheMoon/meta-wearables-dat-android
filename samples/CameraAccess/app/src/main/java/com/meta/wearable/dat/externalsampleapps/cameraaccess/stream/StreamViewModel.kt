@@ -76,10 +76,48 @@ class StreamViewModel(
   private var stateJob: Job? = null
   private var errorJob: Job? = null
   private var sessionStateJob: Job? = null
+  private var liveKitStateJob: Job? = null
   private var stream: Stream? = null
+  private var liveKitPublisher: LiveKitPublisher? = LiveKitPublisher(application)
 
   // Presentation queue for buffering frames after color conversion
   private var presentationQueue: PresentationQueue? = null
+
+  init {
+    liveKitStateJob =
+        viewModelScope.launch {
+          liveKitPublisher?.connectionState?.collect { state ->
+            _uiState.update {
+              when (state) {
+                LiveKitPublisher.ConnectionState.Disconnected ->
+                    it.copy(
+                        liveKitStatus = "LiveKit disconnected",
+                        isLiveKitConnected = false,
+                        isLiveKitConnecting = false,
+                    )
+                LiveKitPublisher.ConnectionState.Connecting ->
+                    it.copy(
+                        liveKitStatus = "LiveKit connecting...",
+                        isLiveKitConnected = false,
+                        isLiveKitConnecting = true,
+                    )
+                LiveKitPublisher.ConnectionState.Connected ->
+                    it.copy(
+                        liveKitStatus = "LiveKit connected",
+                        isLiveKitConnected = true,
+                        isLiveKitConnecting = false,
+                    )
+                is LiveKitPublisher.ConnectionState.Error ->
+                    it.copy(
+                        liveKitStatus = "LiveKit error: ${state.message}",
+                        isLiveKitConnected = false,
+                        isLiveKitConnecting = false,
+                    )
+              }
+            }
+          }
+        }
+  }
 
   fun startStream() {
     videoJob?.cancel()
@@ -192,11 +230,34 @@ class StreamViewModel(
     sessionStateJob = null
     presentationQueue?.stop()
     presentationQueue = null
-    _uiState.update { INITIAL_STATE }
     stream?.stop()
     stream = null
     session?.stop()
     session = null
+    liveKitPublisher?.disconnect()
+    _uiState.update {
+      INITIAL_STATE.copy(
+          liveKitUrl = it.liveKitUrl,
+          liveKitToken = it.liveKitToken,
+      )
+    }
+  }
+
+  fun updateLiveKitUrl(url: String) {
+    _uiState.update { it.copy(liveKitUrl = url) }
+  }
+
+  fun updateLiveKitToken(token: String) {
+    _uiState.update { it.copy(liveKitToken = token) }
+  }
+
+  fun connectLiveKit() {
+    val state = _uiState.value
+    liveKitPublisher?.connect(state.liveKitUrl, state.liveKitToken)
+  }
+
+  fun disconnectLiveKit() {
+    liveKitPublisher?.disconnect()
   }
 
   fun capturePhoto() {
@@ -280,6 +341,7 @@ class StreamViewModel(
     } else {
       Log.e(TAG, "Failed to convert YUV to bitmap")
     }
+    liveKitPublisher?.publishDatFrame(videoFrame)
   }
 
   private fun handlePhotoData(photo: PhotoData) {
@@ -378,6 +440,7 @@ class StreamViewModel(
 
   override fun onCleared() {
     super.onCleared()
+    liveKitStateJob?.cancel()
     stopStream()
     session?.stop()
     session = null

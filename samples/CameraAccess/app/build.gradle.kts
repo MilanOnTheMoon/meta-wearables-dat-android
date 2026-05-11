@@ -61,6 +61,7 @@ android {
 }
 
 dependencies {
+  implementation("io.livekit:livekit-android:2.25.2")
   implementation(libs.androidx.activity.compose)
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.exifinterface)

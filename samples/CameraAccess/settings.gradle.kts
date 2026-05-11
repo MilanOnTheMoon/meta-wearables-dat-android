@@ -40,10 +40,15 @@ dependencyResolutionManagement {
     mavenCentral()
     maven {
       url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
+      content { includeGroup("com.meta.wearable") }
       credentials {
         username = "" // not needed
         password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
       }
+    }
+    maven {
+      url = uri("https://jitpack.io")
+      content { includeGroup("com.github.davidliu") }
     }
   }
 }

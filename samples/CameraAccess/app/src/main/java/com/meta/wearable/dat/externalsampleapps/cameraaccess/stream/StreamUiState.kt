@@ -22,4 +22,9 @@ data class StreamUiState(
     val capturedPhoto: Bitmap? = null,
     val isShareDialogVisible: Boolean = false,
     val isCapturing: Boolean = false,
+    val liveKitUrl: String = "",
+    val liveKitToken: String = "",
+    val liveKitStatus: String = "LiveKit disconnected",
+    val isLiveKitConnected: Boolean = false,
+    val isLiveKitConnecting: Boolean = false,
 )
