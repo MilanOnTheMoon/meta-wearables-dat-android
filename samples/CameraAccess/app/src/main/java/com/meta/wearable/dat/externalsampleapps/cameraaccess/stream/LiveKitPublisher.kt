@@ -95,6 +95,7 @@ class LiveKitPublisher(context: Context) {
                   nextTrack,
                   VideoTrackPublishOptions(
                       name = TRACK_NAME,
+                      simulcast = false,
                       source = Track.Source.CAMERA,
                   ),
               )

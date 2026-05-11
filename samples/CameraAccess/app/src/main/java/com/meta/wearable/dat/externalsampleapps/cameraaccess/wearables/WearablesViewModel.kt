@@ -177,9 +177,12 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
       onAllGranted()
       startMonitoring()
     } else {
-      _uiState.update {
-        it.copy(recentError = "Allow All Permissions (Bluetooth, Bluetooth Connect, Internet)")
-      }
+      val missingPermissions =
+          permissionsResult
+              .filterValues { grantedPermission -> !grantedPermission }
+              .keys
+              .joinToString { permission -> permission.substringAfterLast('.') }
+      _uiState.update { it.copy(recentError = "Allow permissions: $missingPermissions") }
     }
   }
 

@@ -20,7 +20,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess
 import android.Manifest.permission.BLUETOOTH
 import android.Manifest.permission.BLUETOOTH_CONNECT
 import android.Manifest.permission.CAMERA
-import android.Manifest.permission.INTERNET
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -40,8 +40,18 @@ import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
   companion object {
-    // Required Android permissions for the DAT SDK to function properly
-    val PERMISSIONS: Array<String> = arrayOf(BLUETOOTH, BLUETOOTH_CONNECT, CAMERA, INTERNET)
+    // Runtime permissions for the DAT SDK. INTERNET is declared in the manifest, but Android does
+    // not grant it through the runtime permission dialog.
+    val PERMISSIONS: Array<String> =
+        buildList {
+              add(CAMERA)
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(BLUETOOTH_CONNECT)
+              } else {
+                add(BLUETOOTH)
+              }
+            }
+            .toTypedArray()
   }
 
   val viewModel: WearablesViewModel by viewModels()

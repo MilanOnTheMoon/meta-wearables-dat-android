@@ -47,12 +47,19 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URLEncoder
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 @SuppressLint("AutoCloseableUse")
 class StreamViewModel(
@@ -260,6 +267,73 @@ class StreamViewModel(
     liveKitPublisher?.disconnect()
   }
 
+  fun fetchLiveKitToken() {
+    val liveKitUrl = _uiState.value.liveKitUrl.trim()
+    if (liveKitUrl.isBlank()) {
+      _uiState.update { it.copy(liveKitStatus = "Enter LiveKit URL before fetching token") }
+      return
+    }
+
+    viewModelScope.launch(Dispatchers.IO) {
+      _uiState.update {
+        it.copy(
+            isLiveKitTokenFetching = true,
+            liveKitStatus = "Fetching LiveKit token...",
+        )
+      }
+      try {
+        val tokenEndpoint = buildDevTokenEndpoint(liveKitUrl)
+        val connection = URL(tokenEndpoint).openConnection() as HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.connectTimeout = 3000
+        connection.readTimeout = 3000
+
+        val responseCode = connection.responseCode
+        val body =
+            if (responseCode in 200..299) {
+              connection.inputStream.bufferedReader().use { it.readText() }
+            } else {
+              connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }
+        connection.disconnect()
+
+        if (responseCode !in 200..299) {
+          throw IOException("Token endpoint returned HTTP $responseCode: $body")
+        }
+
+        val token = JSONObject(body).getString("token")
+        _uiState.update {
+          it.copy(
+              liveKitToken = token,
+              liveKitStatus = "LiveKit token fetched",
+              isLiveKitTokenFetching = false,
+          )
+        }
+      } catch (t: Throwable) {
+        Log.e(TAG, "Failed to fetch LiveKit token", t)
+        _uiState.update {
+          it.copy(
+              liveKitStatus = "Token fetch failed: ${t.message ?: "unknown error"}",
+              isLiveKitTokenFetching = false,
+          )
+        }
+      }
+    }
+  }
+
+  private fun buildDevTokenEndpoint(liveKitUrl: String): String {
+    val httpUrl =
+        liveKitUrl
+            .replaceFirst("ws://", "http://")
+            .replaceFirst("wss://", "https://")
+    val uri = URI(httpUrl)
+    val scheme = if (uri.scheme == "https") "https" else "http"
+    val host = uri.host ?: throw IllegalArgumentException("Invalid LiveKit URL")
+    val room = URLEncoder.encode("test-room", StandardCharsets.UTF_8.name())
+    val identity = URLEncoder.encode("android-oakley", StandardCharsets.UTF_8.name())
+    return "$scheme://$host:8080/token?room=$room&identity=$identity"
+  }
+
   fun capturePhoto() {
     if (uiState.value.isCapturing) {
       Log.d(TAG, "Photo capture already in progress, ignoring request")
@@ -325,6 +399,8 @@ class StreamViewModel(
   }
 
   private fun handleVideoFrame(videoFrame: VideoFrame) {
+    liveKitPublisher?.publishDatFrame(videoFrame)
+
     // VideoFrame contains raw I420 video data in a ByteBuffer
     // Use optimized YuvToBitmapConverter for direct I420 to ARGB conversion
     val bitmap =
@@ -341,7 +417,6 @@ class StreamViewModel(
     } else {
       Log.e(TAG, "Failed to convert YUV to bitmap")
     }
-    liveKitPublisher?.publishDatFrame(videoFrame)
   }
 
   private fun handlePhotoData(photo: PhotoData) {

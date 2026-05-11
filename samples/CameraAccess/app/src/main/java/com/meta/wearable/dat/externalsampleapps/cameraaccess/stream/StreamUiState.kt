@@ -27,4 +27,5 @@ data class StreamUiState(
     val liveKitStatus: String = "LiveKit disconnected",
     val isLiveKitConnected: Boolean = false,
     val isLiveKitConnecting: Boolean = false,
+    val isLiveKitTokenFetching: Boolean = false,
 )
