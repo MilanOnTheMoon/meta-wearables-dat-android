@@ -181,7 +181,7 @@ class StreamViewModel(
               stream?.stop()
               stream = null
               session
-                  ?.addStream(StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24))
+                  ?.addStream(StreamConfiguration(videoQuality = VideoQuality.HIGH, 24))
                   ?.onSuccess { addedStream ->
                     stream = addedStream
                     videoJob =
