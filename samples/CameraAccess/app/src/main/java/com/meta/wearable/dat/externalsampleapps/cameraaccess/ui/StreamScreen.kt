@@ -72,6 +72,18 @@ fun StreamScreen(
         ),
 ) {
   val streamUiState by streamViewModel.uiState.collectAsStateWithLifecycle()
+  val liveKitStatusColor =
+      when {
+        streamUiState.liveKitStatus.contains("error", ignoreCase = true) ||
+            streamUiState.liveKitStatus.contains("failed", ignoreCase = true) ->
+            Color(0xFFFCA5A5)
+        streamUiState.isLiveKitConnected ||
+            streamUiState.liveKitStatus.contains("fetched", ignoreCase = true) ->
+            Color(0xFF86EFAC)
+        streamUiState.isLiveKitConnecting || streamUiState.isLiveKitTokenFetching ->
+            Color(0xFFFDE68A)
+        else -> Color.White
+      }
   val liveKitFieldColors =
       OutlinedTextFieldDefaults.colors(
           focusedTextColor = Color.White,
@@ -190,7 +202,7 @@ fun StreamScreen(
       }
       Text(
           text = streamUiState.liveKitStatus,
-          color = Color.White,
+          color = liveKitStatusColor,
           style = MaterialTheme.typography.bodySmall,
           modifier = Modifier.fillMaxWidth(),
       )
