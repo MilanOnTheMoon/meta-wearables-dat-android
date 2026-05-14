@@ -12,6 +12,7 @@ import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoCaptureParameter
 import io.livekit.android.room.track.video.VideoFrameCapturer
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,8 +44,10 @@ class LiveKitPublisher(context: Context) {
 
   private val appContext = context.applicationContext
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private val frameScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   private val connectionMutex = Mutex()
   private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+  private val isPushingFrame = AtomicBoolean(false)
 
   val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
@@ -102,7 +105,6 @@ class LiveKitPublisher(context: Context) {
 
           if (!isTrackPublished) {
             nextTrack.stopCapture()
-            nextTrack.dispose()
             nextRoom.release()
             _connectionState.value = ConnectionState.Error("Failed to publish LiveKit video track")
             return@withLock
@@ -131,17 +133,37 @@ class LiveKitPublisher(context: Context) {
       return
     }
 
-    try {
-      val webRtcFrame = frame.toWebRtcVideoFrame() ?: return
-      currentCapturer.pushVideoFrame(webRtcFrame)
-      webRtcFrame.release()
+    if (!isPushingFrame.compareAndSet(false, true)) {
+      return
+    }
 
-      pushedFrameCount += 1
-      if (pushedFrameCount % LOG_FRAME_INTERVAL == 0) {
-        Log.d(TAG, "Published $pushedFrameCount LiveKit frames (${frame.width}x${frame.height})")
+    try {
+      val webRtcFrame =
+          frame.toWebRtcVideoFrame()
+              ?: run {
+                isPushingFrame.set(false)
+                return
+              }
+      val width = frame.width
+      val height = frame.height
+      frameScope.launch {
+        try {
+          currentCapturer.pushVideoFrame(webRtcFrame)
+          webRtcFrame.release()
+
+          pushedFrameCount += 1
+          if (pushedFrameCount % LOG_FRAME_INTERVAL == 0) {
+            Log.d(TAG, "Published $pushedFrameCount LiveKit frames (${width}x${height})")
+          }
+        } catch (t: Throwable) {
+          Log.e(TAG, "Failed to push DAT frame to LiveKit", t)
+        } finally {
+          isPushingFrame.set(false)
+        }
       }
     } catch (t: Throwable) {
       Log.e(TAG, "Failed to publish DAT frame to LiveKit", t)
+      isPushingFrame.set(false)
     }
   }
 
@@ -157,21 +179,24 @@ class LiveKitPublisher(context: Context) {
 
   private fun cleanup() {
     isTrackPublished = false
-    try {
-      localVideoTrack?.stopCapture()
-      localVideoTrack?.dispose()
-    } catch (t: Throwable) {
-      Log.w(TAG, "Error disposing LiveKit video track", t)
-    }
+    isPushingFrame.set(false)
+    val currentRoom = room
+    val currentTrack = localVideoTrack
+    room = null
     localVideoTrack = null
     capturer = null
 
     try {
-      room?.release()
+      currentTrack?.stopCapture()
+    } catch (t: Throwable) {
+      Log.w(TAG, "Error stopping LiveKit video track", t)
+    }
+
+    try {
+      currentRoom?.release()
     } catch (t: Throwable) {
       Log.w(TAG, "Error releasing LiveKit room", t)
     }
-    room = null
   }
 
   private fun VideoFrame.toWebRtcVideoFrame(): WebRtcVideoFrame? {

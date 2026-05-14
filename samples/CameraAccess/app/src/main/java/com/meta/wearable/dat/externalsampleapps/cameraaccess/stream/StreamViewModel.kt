@@ -178,7 +178,7 @@ class StreamViewModel(
                   ?.onSuccess { addedStream ->
                     stream = addedStream
                     videoJob =
-                        viewModelScope.launch {
+                        viewModelScope.launch(Dispatchers.Default) {
                           Log.d(TAG, "Collecting video frames from stream")
                           stream?.videoStream?.collect { handleVideoFrame(it) }
                           Log.d(TAG, "Video stream collection ended")
