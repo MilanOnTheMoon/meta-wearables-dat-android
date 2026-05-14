@@ -20,6 +20,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -71,10 +72,15 @@ class StreamViewModel(
     private const val TAG = "CameraAccess:StreamViewModel"
     private val INITIAL_STATE = StreamUiState()
     private val SESSION_TERMINAL_STATES = setOf(StreamSessionState.CLOSED)
+    private const val LIVEKIT_PREFS_NAME = "camera_access_livekit"
+    private const val LIVEKIT_URL_KEY = "livekit_url"
+    private const val LIVEKIT_TOKEN_KEY = "livekit_token"
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
   private var session: Session? = null
+  private val liveKitPrefs: SharedPreferences =
+      application.getSharedPreferences(LIVEKIT_PREFS_NAME, Application.MODE_PRIVATE)
 
   private val _uiState = MutableStateFlow(INITIAL_STATE)
   val uiState: StateFlow<StreamUiState> = _uiState.asStateFlow()
@@ -91,6 +97,7 @@ class StreamViewModel(
   private var presentationQueue: PresentationQueue? = null
 
   init {
+    loadSavedLiveKitSettings()
     liveKitStateJob =
         viewModelScope.launch {
           liveKitPublisher?.connectionState?.collect { state ->
@@ -252,14 +259,17 @@ class StreamViewModel(
 
   fun updateLiveKitUrl(url: String) {
     _uiState.update { it.copy(liveKitUrl = url) }
+    saveLiveKitSettings(url = url)
   }
 
   fun updateLiveKitToken(token: String) {
     _uiState.update { it.copy(liveKitToken = token) }
+    saveLiveKitSettings(token = token)
   }
 
   fun connectLiveKit() {
     val state = _uiState.value
+    saveLiveKitSettings(url = state.liveKitUrl, token = state.liveKitToken)
     liveKitPublisher?.connect(state.liveKitUrl, state.liveKitToken)
   }
 
@@ -302,6 +312,7 @@ class StreamViewModel(
         }
 
         val token = JSONObject(body).getString("token")
+        saveLiveKitSettings(url = liveKitUrl, token = token)
         _uiState.update {
           it.copy(
               liveKitToken = token,
@@ -332,6 +343,29 @@ class StreamViewModel(
     val room = URLEncoder.encode("test-room", StandardCharsets.UTF_8.name())
     val identity = URLEncoder.encode("android-oakley", StandardCharsets.UTF_8.name())
     return "$scheme://$host:8080/token?room=$room&identity=$identity"
+  }
+
+  private fun loadSavedLiveKitSettings() {
+    val savedUrl = liveKitPrefs.getString(LIVEKIT_URL_KEY, "").orEmpty()
+    val savedToken = liveKitPrefs.getString(LIVEKIT_TOKEN_KEY, "").orEmpty()
+    if (savedUrl.isNotBlank() || savedToken.isNotBlank()) {
+      _uiState.update {
+        it.copy(
+            liveKitUrl = savedUrl,
+            liveKitToken = savedToken,
+        )
+      }
+    }
+  }
+
+  private fun saveLiveKitSettings(url: String? = null, token: String? = null) {
+    liveKitPrefs
+        .edit()
+        .apply {
+          url?.let { putString(LIVEKIT_URL_KEY, it) }
+          token?.let { putString(LIVEKIT_TOKEN_KEY, it) }
+        }
+        .apply()
   }
 
   fun capturePhoto() {
