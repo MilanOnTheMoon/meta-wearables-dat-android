@@ -20,6 +20,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess
 import android.Manifest.permission.BLUETOOTH
 import android.Manifest.permission.BLUETOOTH_CONNECT
 import android.Manifest.permission.CAMERA
+import android.Manifest.permission.ACCESS_FINE_LOCATION
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -45,6 +46,7 @@ class MainActivity : ComponentActivity() {
     val PERMISSIONS: Array<String> =
         buildList {
               add(CAMERA)
+              add(ACCESS_FINE_LOCATION)
               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 add(BLUETOOTH_CONNECT)
               } else {

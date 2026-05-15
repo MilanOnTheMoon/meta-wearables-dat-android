@@ -18,14 +18,22 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 
 import android.annotation.SuppressLint
+import android.Manifest
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.FileProvider
+import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -75,12 +83,15 @@ class StreamViewModel(
     private const val LIVEKIT_PREFS_NAME = "camera_access_livekit"
     private const val LIVEKIT_URL_KEY = "livekit_url"
     private const val LIVEKIT_TOKEN_KEY = "livekit_token"
+    private const val LOCATION_PUBLISH_INTERVAL_MS = 1000L
   }
 
   private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
   private var session: Session? = null
   private val liveKitPrefs: SharedPreferences =
       application.getSharedPreferences(LIVEKIT_PREFS_NAME, Application.MODE_PRIVATE)
+  private val locationManager =
+      application.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
   private val _uiState = MutableStateFlow(INITIAL_STATE)
   val uiState: StateFlow<StreamUiState> = _uiState.asStateFlow()
@@ -92,6 +103,9 @@ class StreamViewModel(
   private var liveKitStateJob: Job? = null
   private var stream: Stream? = null
   private var liveKitPublisher: LiveKitPublisher? = LiveKitPublisher(application)
+  private var lastLocationPublishMs = 0L
+  private var isLocationPublishing = false
+  private val locationListener = LocationListener { location -> publishPhoneLocation(location) }
 
   // Presentation queue for buffering frames after color conversion
   private var presentationQueue: PresentationQueue? = null
@@ -128,6 +142,12 @@ class StreamViewModel(
                         isLiveKitConnecting = false,
                     )
               }
+            }
+            when (state) {
+              LiveKitPublisher.ConnectionState.Connected -> startLocationPublishing()
+              LiveKitPublisher.ConnectionState.Connecting -> Unit
+              LiveKitPublisher.ConnectionState.Disconnected,
+              is LiveKitPublisher.ConnectionState.Error -> stopLocationPublishing()
             }
           }
         }
@@ -248,6 +268,7 @@ class StreamViewModel(
     stream = null
     session?.stop()
     session = null
+    stopLocationPublishing()
     liveKitPublisher?.disconnect()
     _uiState.update {
       INITIAL_STATE.copy(
@@ -274,6 +295,7 @@ class StreamViewModel(
   }
 
   fun disconnectLiveKit() {
+    stopLocationPublishing()
     liveKitPublisher?.disconnect()
   }
 
@@ -366,6 +388,92 @@ class StreamViewModel(
           token?.let { putString(LIVEKIT_TOKEN_KEY, it) }
         }
         .apply()
+  }
+
+  private fun startLocationPublishing() {
+    if (isLocationPublishing) {
+      return
+    }
+
+    if (!hasLocationPermission()) {
+      Log.w(TAG, "Phone GPS metadata disabled; location permission is not granted")
+      return
+    }
+
+    var started = false
+    listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).forEach { provider ->
+      try {
+        if (locationManager.isProviderEnabled(provider)) {
+          locationManager.requestLocationUpdates(
+              provider,
+              LOCATION_PUBLISH_INTERVAL_MS,
+              0f,
+              locationListener,
+              Looper.getMainLooper(),
+          )
+          locationManager.getLastKnownLocation(provider)?.let { publishPhoneLocation(it) }
+          started = true
+        }
+      } catch (securityException: SecurityException) {
+        Log.w(TAG, "Phone GPS metadata disabled; permission was denied", securityException)
+      } catch (t: Throwable) {
+        Log.w(TAG, "Unable to start phone GPS metadata from provider=$provider", t)
+      }
+    }
+
+    isLocationPublishing = started
+    if (started) {
+      Log.d(TAG, "Started phone GPS metadata publishing")
+    } else {
+      Log.w(TAG, "Phone GPS metadata disabled; no location provider is enabled")
+    }
+  }
+
+  private fun stopLocationPublishing() {
+    if (!isLocationPublishing) {
+      return
+    }
+
+    try {
+      locationManager.removeUpdates(locationListener)
+    } catch (t: Throwable) {
+      Log.w(TAG, "Unable to stop phone GPS metadata publishing", t)
+    }
+    isLocationPublishing = false
+  }
+
+  private fun hasLocationPermission(): Boolean {
+    val context = getApplication<Application>()
+    return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+  }
+
+  private fun publishPhoneLocation(location: Location) {
+    val nowMs = System.currentTimeMillis()
+    if (nowMs - lastLocationPublishMs < LOCATION_PUBLISH_INTERVAL_MS) {
+      return
+    }
+    lastLocationPublishMs = nowMs
+
+    val payload =
+        JSONObject()
+            .put("type", "phone_gps")
+            .put("source", "phone")
+            .put("provider", location.provider)
+            .put("lat", location.latitude)
+            .put("lon", location.longitude)
+            .put("accuracy_m", location.accuracy.toDouble())
+            .put("timestamp_ms", location.time)
+    if (location.hasAltitude()) {
+      payload.put("altitude_m", location.altitude)
+    }
+    if (location.hasBearing()) {
+      payload.put("bearing_deg", location.bearing.toDouble())
+    }
+    if (location.hasSpeed()) {
+      payload.put("speed_mps", location.speed.toDouble())
+    }
+    liveKitPublisher?.publishLocation(payload.toString())
   }
 
   fun capturePhoto() {

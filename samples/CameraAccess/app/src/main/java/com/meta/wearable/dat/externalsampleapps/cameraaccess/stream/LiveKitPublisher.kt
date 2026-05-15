@@ -6,12 +6,14 @@ import com.meta.wearable.dat.camera.types.VideoFrame
 import io.livekit.android.LiveKit
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.VideoTrackPublishOptions
+import io.livekit.android.room.track.DataPublishReliability
 import io.livekit.android.room.track.LocalVideoTrack
 import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoCaptureParameter
 import io.livekit.android.room.track.video.VideoFrameCapturer
 import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +35,7 @@ class LiveKitPublisher(context: Context) {
     private const val DEFAULT_HEIGHT = 896
     private const val DEFAULT_FPS = 24
     private const val LOG_FRAME_INTERVAL = 30
+    const val LOCATION_TOPIC = "phone-gps"
   }
 
   sealed interface ConnectionState {
@@ -56,6 +59,7 @@ class LiveKitPublisher(context: Context) {
   private var localVideoTrack: LocalVideoTrack? = null
   private var isTrackPublished = false
   private var pushedFrameCount = 0
+  private var publishedLocationCount = 0
 
   fun connect(url: String, token: String) {
     scope.launch {
@@ -114,6 +118,7 @@ class LiveKitPublisher(context: Context) {
           capturer = nextCapturer
           localVideoTrack = nextTrack
           pushedFrameCount = 0
+          publishedLocationCount = 0
           _connectionState.value = ConnectionState.Connected
           Log.d(TAG, "Connected to LiveKit and published track=$TRACK_NAME")
         } catch (t: Throwable) {
@@ -174,6 +179,30 @@ class LiveKitPublisher(context: Context) {
         _connectionState.value = ConnectionState.Disconnected
         Log.d(TAG, "Disconnected from LiveKit")
       }
+    }
+  }
+
+  fun publishLocation(json: String) {
+    val currentRoom = room
+    if (_connectionState.value != ConnectionState.Connected || currentRoom == null) {
+      return
+    }
+
+    frameScope.launch {
+      val result =
+          currentRoom.localParticipant.publishData(
+              json.toByteArray(StandardCharsets.UTF_8),
+              reliability = DataPublishReliability.RELIABLE,
+              topic = LOCATION_TOPIC,
+          )
+      result
+          .onSuccess {
+            publishedLocationCount += 1
+            if (publishedLocationCount % 10 == 0) {
+              Log.d(TAG, "Published $publishedLocationCount phone GPS updates")
+            }
+          }
+          .onFailure { Log.w(TAG, "Failed to publish phone GPS update", it) }
     }
   }
 
